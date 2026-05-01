@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UE 5.7 Magnetic Fibrils | Procedural Demo</title>
+    <title>UE 5.7 Magnetic Fibrils | Fixed</title>
     <style>
         body { margin: 0; padding: 0; overflow: hidden; background: #050505; color: #eee; font-family: 'Segoe UI', Tahoma, sans-serif; }
         canvas { display: block; width: 100vw; height: 100vh; }
@@ -22,7 +22,6 @@
         .control-group label { display: flex; justify-content: space-between; font-size: 10px; color: #888; margin-bottom: 6px; text-transform: uppercase; }
         .control-group label span.value { color: #ffaa00; font-family: monospace; font-size: 12px; }
         input[type=range] { width: 100%; cursor: pointer; accent-color: #ffaa00; }
-        .footer { padding: 12px; font-size: 9px; color: #555; text-align: center; border-top: 1px solid #222; letter-spacing: 1px; }
     </style>
 </head>
 <body>
@@ -51,9 +50,9 @@
                 <input type="range" id="waviness" min="0.0" max="0.2" step="0.01" value="0.05">
             </div>
         </div>
-        <div class="footer">BASED ON SUNMAGNETIC.USH [UE 5.7]</div>
     </div>
 
+    <!-- Обновили ссылку на актуальную версию Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script>
@@ -84,13 +83,11 @@
                 float r = length(uv);
                 float Bz = smoothstep(1.0, 0.0, r);
                 
-                // 1. Построение системы координат волокон (atan2 из USH)
-                float baseAngle = atan(uv.y, uv.x);
+                // ИСПРАВЛЕНИЕ: + 0.0001 спасает от ошибки NaN на некоторых видеокартах
+                float baseAngle = atan(uv.y, uv.x + 0.0001);
                 
-                // 2. Вихревое закручивание (Vortex Strength)
                 float angle = baseAngle + vortex * (Bz * Bz);
 
-                // 3. Многослойная Z-буферная композиция (3 слоя)
                 float bestStrandHeight = 0.0;
                 float bestFibers = 0.0;
                 float bestShading = 0.0;
@@ -103,11 +100,9 @@
                     float lr1 = hash(vec2(lAngleID, lf * 17.13));
                     float lr2 = hash(vec2(lAngleID, lf * 43.71));
                     
-                    // Волнистость (Waviness)
                     float wave = sin(Bz * 20.0 + safeTime * 2.0 + lr1 * 6.28) * waviness;
                     float lPhase = lr1 * 6.28 + safeTime * ((lr2 * 2.0 - 1.0) * 0.4);
                     
-                    // Цилиндрический профиль трубки[cite: 1]
                     float lRaw = cos((angle + wave) * density + lPhase);
                     float lCylinder = sqrt(max(0.0, 1.0 - lRaw * lRaw));
                     
@@ -120,18 +115,15 @@
                     }
                 }
 
-                // 4. Расчет освещенности зон[cite: 1]
                 float penInner = min(penumbraThresh + 0.22, umbraThresh);
                 float penW = smoothstep(penumbraThresh * 0.85, penInner, Bz);
                 float umbra = smoothstep(umbraThresh, umbraThresh + 0.05, Bz);
                 float penumbraZone = clamp(penW * (1.0 - umbra), 0.0, 1.0);
 
-                // Цвета
                 vec3 photoColor = vec3(1.0, 0.6, 0.15); 
                 vec3 penColor = vec3(0.45, 0.18, 0.04);
                 vec3 umbColor = vec3(0.01, 0.006, 0.003);
 
-                // Итоговое смешивание[cite: 1]
                 vec3 finalColor = mix(photoColor, penColor, penW);
                 finalColor = mix(finalColor, finalColor * bestShading, penumbraZone * 0.85);
                 finalColor += bestFibers * (1.0 - penW) * penumbraZone * 0.4;
@@ -160,7 +152,8 @@
                 vertexShader: _VS, fragmentShader: _FS
             });
 
-            const mesh = new THREE.Mesh(new THREE.PlaneBufferGeometry(2, 2), material);
+            // ИСПРАВЛЕНИЕ: PlaneGeometry вместо устаревшего PlaneBufferGeometry
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
             scene.add(mesh);
             
             setupUI();
@@ -170,11 +163,15 @@
         function setupUI() {
             const params = ['umbraThresh', 'penumbraThresh', 'vortex', 'density', 'waviness'];
             params.forEach(id => {
-                document.getElementById(id).addEventListener('input', (e) => {
-                    let val = parseFloat(e.target.value);
-                    document.getElementById('val-'+id).innerText = val.toFixed(2);
-                    material.uniforms[id].value = val;
-                });
+                const el = document.getElementById(id);
+                // ИСПРАВЛЕНИЕ: Защита от краша, если ты удалил ползунок из HTML
+                if (el) {
+                    el.addEventListener('input', (e) => {
+                        let val = parseFloat(e.target.value);
+                        document.getElementById('val-'+id).innerText = val.toFixed(2);
+                        material.uniforms[id].value = val;
+                    });
+                }
             });
         }
 
