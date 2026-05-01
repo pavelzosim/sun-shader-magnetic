@@ -1,89 +1,194 @@
-precision highp float;
-uniform float time;
-uniform float umbraThresh;
-uniform float penumbraThresh;
-uniform float fibrilIntensity;
-varying vec2 vUv;
-
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-}
-
-void main() {
-    vec2 uv = (vUv - 0.5) * 2.0;
-    float r = length(uv);
-    
-    // 1. Bz Field - Магнитная интенсивность
-    float Bz = smoothstep(1.0, 0.0, r);
-    
-    // 2. Flow & Angle - вычисление направления волокон через atan2
-    // В оригинале используется запеченный FlowVec, здесь мы имитируем его радиально
-    float baseAngle = atan(uv.y, uv.x);
-    
-    // VortexStrength - вихревое закручивание, нарастающее к центру
-    float angle = baseAngle + (2.5 * fibrilIntensity) * (Bz * Bz);
-
-    // 3. Multi-layer Fibril Compositing (Z-buffer logic)
-    float bestStrandHeight = 0.0;
-    float bestFibers = 0.0;
-    float bestShading = 0.0;
-    
-    float FibrilFreq = 60.0;
-    float safeTime = mod(time, 3600.0);
-
-    // Оптимизированный цикл из 3 итераций как в оригинале
-    for (int i = 0; i < 3; i++) {
-        float lf = float(i);
-        
-        // Сдвиг секторов для переплетения нитей[cite: 1]
-        float lSectorF = (angle + lf * 0.31) * (FibrilFreq / 6.2831);
-        float lAngleID = floor(lSectorF);
-        
-        // Индивидуальные параметры нити через хэш[cite: 1]
-        float lr1 = hash(vec2(lAngleID, lf * 17.13));
-        float lr2 = hash(vec2(lAngleID, lf * 43.71));
-        
-        // Фазовый дрифт (анимация течения плазмы)[cite: 1]
-        float lPhase = lr1 * 6.2831 + safeTime * ((lr2 * 2.0 - 1.0) * 0.5);
-        
-        // Цилиндрический профиль (имитация трубки)[cite: 1]
-        float lRaw = cos(angle * FibrilFreq + lPhase);
-        float lCylinder = sqrt(max(0.0, 1.0 - lRaw * lRaw));
-        
-        // Вычисление Z-уровня для окклюзии[cite: 1]
-        float lBaseZ = 1.0 - lf * 0.28;
-        float lStrandHeight = lCylinder * lBaseZ;
-
-        // Z-buffer select: побеждает тот, кто выше[cite: 1]
-        if (lStrandHeight > bestStrandHeight) {
-            bestStrandHeight = lStrandHeight;
-            bestFibers = pow(lCylinder, 3.0) * (0.55 + lr1 * 0.9); // FibrilSharpness[cite: 1]
-            bestShading = mix(0.45, 1.0, pow(lCylinder, 0.5)); // Self-shadowing[cite: 1]
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UE 5.7 Magnetic Fibrils | Procedural Demo</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background: #050505; color: #eee; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui-panel {
+            position: absolute; top: 20px; left: 20px;
+            width: 300px; background: rgba(10, 10, 10, 0.95);
+            padding: 0; border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+            z-index: 100; border: 1px solid #444;
+            backdrop-filter: blur(10px);
         }
-    }
+        .ui-header { padding: 15px 20px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
+        .ui-header h2 { margin: 0; font-size: 13px; color: #ffaa00; text-transform: uppercase; letter-spacing: 1.5px; }
+        .ui-content { padding: 20px; }
+        .control-group { margin-bottom: 18px; }
+        .control-group label { display: flex; justify-content: space-between; font-size: 10px; color: #888; margin-bottom: 6px; text-transform: uppercase; }
+        .control-group label span.value { color: #ffaa00; font-family: monospace; font-size: 12px; }
+        input[type=range] { width: 100%; cursor: pointer; accent-color: #ffaa00; }
+        .footer { padding: 12px; font-size: 9px; color: #555; text-align: center; border-top: 1px solid #222; letter-spacing: 1px; }
+    </style>
+</head>
+<body>
 
-    // 4. Маски зон (Penumbra & Umbra)[cite: 1]
-    float penW = smoothstep(penumbraThresh * 0.85, penumbraThresh + 0.22, Bz);
-    float umbra = smoothstep(umbraThresh, 1.0, Bz);
-    float penumbraZone = clamp(penW * (1.0 - umbra), 0.0, 1.0);
+    <div id="ui-panel">
+        <div class="ui-header"><h2>Sun Magnetic USH</h2></div>
+        <div class="ui-content">
+            <div class="control-group">
+                <label>Umbra Size <span id="val-umbraThresh" class="value">0.62</span></label>
+                <input type="range" id="umbraThresh" min="0.4" max="0.8" step="0.01" value="0.62">
+            </div>
+            <div class="control-group">
+                <label>Penumbra Size <span id="val-penumbraThresh" class="value">0.40</span></label>
+                <input type="range" id="penumbraThresh" min="0.1" max="0.6" step="0.01" value="0.40">
+            </div>
+            <div class="control-group">
+                <label>Vortex Strength <span id="val-vortex" class="value">1.50</span></label>
+                <input type="range" id="vortex" min="0.0" max="5.0" step="0.1" value="1.50">
+            </div>
+            <div class="control-group">
+                <label>Fibril Density <span id="val-density" class="value">60.0</span></label>
+                <input type="range" id="density" min="10.0" max="120.0" step="1.0" value="60.0">
+            </div>
+            <div class="control-group">
+                <label>Waviness <span id="val-waviness" class="value">0.05</span></label>
+                <input type="range" id="waviness" min="0.0" max="0.2" step="0.01" value="0.05">
+            </div>
+        </div>
+        <div class="footer">BASED ON SUNMAGNETIC.USH [UE 5.7]</div>
+    </div>
 
-    // 5. Финальная сборка цвета[cite: 1]
-    vec3 baseColor = vec3(1.0, 0.55, 0.1); // Фотосфера
-    vec3 penColor = vec3(0.4, 0.18, 0.05);  // База пенумбры
-    vec3 umbColor = vec3(0.01, 0.005, 0.002); // Умбра
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
-    // Эффект нитей (fiberEffect)[cite: 1]
-    float fiberEffect = bestFibers * (1.0 - 0.6) * (1.0 - penW) * (1.0 - umbra);
-    
-    // Смешивание по логике "darkeningWithFibers"[cite: 1]
-    vec3 finalColor = mix(baseColor, penColor, penW);
-    
-    // Наложение теней между нитями[cite: 1]
-    finalColor = mix(finalColor, finalColor * bestShading, penumbraZone * 0.8);
-    finalColor += fiberEffect * 0.3; // Добавочная яркость волокон[cite: 1]
-    
-    // Умбра перекрывает всё сверху[cite: 1]
-    finalColor = mix(finalColor, umbColor, umbra);
+    <script>
+        let scene, camera, renderer, material;
+        const startTime = Date.now();
 
-    gl_FragColor = vec4(finalColor, 1.0);
-}
+        const _VS = `
+            varying vec2 vUv;
+            void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
+        `;
+
+        const _FS = `
+            precision highp float;
+            uniform float time;
+            uniform float umbraThresh;
+            uniform float penumbraThresh;
+            uniform float vortex;
+            uniform float density;
+            uniform float waviness;
+            varying vec2 vUv;
+
+            float hash(vec2 p) {
+                return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+            }
+
+            void main() {
+                vec2 uv = (vUv - 0.5) * 2.0;
+                float r = length(uv);
+                float Bz = smoothstep(1.0, 0.0, r);
+                
+                // 1. Построение системы координат волокон (atan2 из USH)
+                float baseAngle = atan(uv.y, uv.x);
+                
+                // 2. Вихревое закручивание (Vortex Strength)
+                float angle = baseAngle + vortex * (Bz * Bz);
+
+                // 3. Многослойная Z-буферная композиция (3 слоя)
+                float bestStrandHeight = 0.0;
+                float bestFibers = 0.0;
+                float bestShading = 0.0;
+                float safeTime = mod(time, 3600.0);
+
+                for (int i = 0; i < 3; i++) {
+                    float lf = float(i);
+                    float lAngleID = floor((angle + lf * 0.31) * (density / 6.2831));
+                    
+                    float lr1 = hash(vec2(lAngleID, lf * 17.13));
+                    float lr2 = hash(vec2(lAngleID, lf * 43.71));
+                    
+                    // Волнистость (Waviness)
+                    float wave = sin(Bz * 20.0 + safeTime * 2.0 + lr1 * 6.28) * waviness;
+                    float lPhase = lr1 * 6.28 + safeTime * ((lr2 * 2.0 - 1.0) * 0.4);
+                    
+                    // Цилиндрический профиль трубки[cite: 1]
+                    float lRaw = cos((angle + wave) * density + lPhase);
+                    float lCylinder = sqrt(max(0.0, 1.0 - lRaw * lRaw));
+                    
+                    float lStrandHeight = lCylinder * (1.0 - lf * 0.25);
+
+                    if (lStrandHeight > bestStrandHeight) {
+                        bestStrandHeight = lStrandHeight;
+                        bestFibers = pow(lCylinder, 3.5); 
+                        bestShading = mix(0.4, 1.0, pow(lCylinder, 0.5)); 
+                    }
+                }
+
+                // 4. Расчет освещенности зон[cite: 1]
+                float penInner = min(penumbraThresh + 0.22, umbraThresh);
+                float penW = smoothstep(penumbraThresh * 0.85, penInner, Bz);
+                float umbra = smoothstep(umbraThresh, umbraThresh + 0.05, Bz);
+                float penumbraZone = clamp(penW * (1.0 - umbra), 0.0, 1.0);
+
+                // Цвета
+                vec3 photoColor = vec3(1.0, 0.6, 0.15); 
+                vec3 penColor = vec3(0.45, 0.18, 0.04);
+                vec3 umbColor = vec3(0.01, 0.006, 0.003);
+
+                // Итоговое смешивание[cite: 1]
+                vec3 finalColor = mix(photoColor, penColor, penW);
+                finalColor = mix(finalColor, finalColor * bestShading, penumbraZone * 0.85);
+                finalColor += bestFibers * (1.0 - penW) * penumbraZone * 0.4;
+                finalColor = mix(finalColor, umbColor, umbra);
+
+                gl_FragColor = vec4(finalColor, 1.0);
+            }
+        `;
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.Camera();
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            material = new THREE.ShaderMaterial({
+                uniforms: {
+                    time: { value: 0 },
+                    umbraThresh: { value: 0.62 },
+                    penumbraThresh: { value: 0.40 },
+                    vortex: { value: 1.5 },
+                    density: { value: 60.0 },
+                    waviness: { value: 0.05 }
+                },
+                vertexShader: _VS, fragmentShader: _FS
+            });
+
+            const mesh = new THREE.Mesh(new THREE.PlaneBufferGeometry(2, 2), material);
+            scene.add(mesh);
+            
+            setupUI();
+            animate();
+        }
+
+        function setupUI() {
+            const params = ['umbraThresh', 'penumbraThresh', 'vortex', 'density', 'waviness'];
+            params.forEach(id => {
+                document.getElementById(id).addEventListener('input', (e) => {
+                    let val = parseFloat(e.target.value);
+                    document.getElementById('val-'+id).innerText = val.toFixed(2);
+                    material.uniforms[id].value = val;
+                });
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            material.uniforms.time.value = (Date.now() - startTime) * 0.001;
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        init();
+    </script>
+</body>
+</html>
